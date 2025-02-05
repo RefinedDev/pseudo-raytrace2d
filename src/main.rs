@@ -3,6 +3,7 @@ use std::f32::consts::PI;
 use bevy::{
     color::palettes::css::WHITE,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
     input::mouse::{AccumulatedMouseMotion, MouseButtonInput},
     prelude::*,
 };
@@ -22,7 +23,7 @@ struct M1Held(bool);
 struct NumberOfRays(f32);
 
 #[derive(Component)]
-struct Oscillate{
+struct Oscillate {
     radius: f32,
 }
 
@@ -31,30 +32,51 @@ struct Sun {
     radius: f32,
 }
 
+#[derive(Component)]
+struct RayText;
+
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup_window, draw_shapes))
-        .add_systems(
-            Update,
-            (
-                oscillate_target,
-                (move_sun, draw_rays).chain(),
-                control_rays_amount,
-            ),
-        )
-        .insert_resource(M1Held(false))
-        .insert_resource(NumberOfRays(100.0))
-        .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
-        .run();
+    app.add_plugins((
+        DefaultPlugins,
+        FpsOverlayPlugin {
+            config: FpsOverlayConfig {
+                text_config: TextFont {
+                    font_size: 30.0,
+                    ..default()
+                },
+                text_color: Color::linear_rgb(0.0, 255.0, 0.0),
+                enabled: true,
+            },
+        },
+    ))
+    .add_systems(Startup, (setup_window, spawn).chain())
+    .add_systems(
+        Update,
+        (
+            oscillate_target,
+            (move_sun, draw_rays).chain(),
+            control_rays_amount,
+        ),
+    )
+    .insert_resource(M1Held(false))
+    .insert_resource(NumberOfRays(100.0))
+    .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
+    .run();
 }
 
-fn control_rays_amount(keyboard_input: Res<ButtonInput<KeyCode>>, mut rays: ResMut<NumberOfRays>) {
+fn control_rays_amount(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut rays: ResMut<NumberOfRays>,
+    mut text: Single<&mut Text, With<RayText>>,
+) {
     if keyboard_input.pressed(KeyCode::ArrowRight) {
         rays.0 += 1.0;
     } else if keyboard_input.pressed(KeyCode::ArrowLeft) {
         rays.0 -= 1.0;
     }
+
+    text.0 = format!("Number of rays: {}", rays.0);
 }
 
 fn draw_rays(
@@ -155,7 +177,7 @@ fn move_sun(
     }
 }
 
-fn draw_shapes(
+fn spawn(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -167,11 +189,14 @@ fn draw_shapes(
             ..default()
         },
         Tonemapping::TonyMcMapface,
-        Bloom::default()
+        Bloom {
+            intensity: 0.10,
+            ..default()
+        },
     ));
 
     // sun
-    const SUN_RADIUS: f32 = 150.0;
+    const SUN_RADIUS: f32 = 75.0;
     commands.spawn((
         Mesh2d(meshes.add(Circle::new(SUN_RADIUS))),
         Sun { radius: SUN_RADIUS },
@@ -180,11 +205,28 @@ fn draw_shapes(
     ));
 
     // target
-    const TARGET_RADIUS: f32 = 75.0;
+    const TARGET_RADIUS: f32 = 150.0;
     commands.spawn((
         Mesh2d(meshes.add(Circle::new(TARGET_RADIUS))),
-        Oscillate { radius: TARGET_RADIUS },
+        Oscillate {
+            radius: TARGET_RADIUS,
+        },
         MeshMaterial2d(materials.add(Color::linear_rgb(255.0, 255.0, 255.0))),
+    ));
+
+    commands.spawn((
+        Text::new("Number of rays: _"),
+        TextFont {
+            font_size: 30.0,
+            ..default()
+        },
+        TextColor(Color::linear_rgb(0.0, 255.0, 0.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(30.0),
+            ..default()
+        },
+        RayText
     ));
 }
 
