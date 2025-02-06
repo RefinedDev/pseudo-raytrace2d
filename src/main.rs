@@ -41,14 +41,8 @@ fn main() {
         },
     ))
     .add_systems(Startup, (setup_window, spawn).chain())
-    .add_systems(
-        Update,
-        (
-            oscillate_target,
-            (move_sun, draw_rays).chain(),
-            control_rays_amount,
-        ),
-    )
+    .add_systems(Update, (draw_rays, control_rays_amount))
+    .add_systems(FixedUpdate, (oscillate_target, move_objects))
     .insert_resource(M1Held(false))
     .insert_resource(NumberOfRays(100.0))
     .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
@@ -106,7 +100,9 @@ fn draw_rays(
             let d = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
 
             if d < target.1.radius.powi(2) {
-                // foot of perpendicular formula
+                // foot of perpendicular formula for line, its not accurate for circle
+                // due to its curvature but i can conceal the extended part by ZIndex :P
+                // i should rather intersect for the exact coordinate
                 let foot_x = -m * (m * x_target - y_target + c) / (m * m + 1.0) + x_target;
                 let foot_y = (m * x_target - y_target + c) / (m * m + 1.0) + y_target;
                 end.x = foot_x;
@@ -120,47 +116,70 @@ fn draw_rays(
     }
 }
 
-fn oscillate_target(target_q: Single<&mut Transform, With<Oscillate>>, time: Res<Time>) {
+fn oscillate_target(target_q: Single<&mut Transform, With<Oscillate>>, time: Res<Time<Fixed>>) {
     let mut object = target_q.into_inner();
-    object.translation = Vec3::new(
-        350.0 + 50.0 * ops::cos(time.elapsed_secs()),
-        100.0 * ops::sin(time.elapsed_secs()),
-        1.0,
+    object.translation += Vec3::new(
+        30.0 * 0.5 * ops::cos(time.elapsed_secs()) * time.delta_secs(),
+        30.0 * 1.1 * ops::sin(time.elapsed_secs()) * time.delta_secs(),
+        0.0,
     );
 }
 
-fn move_sun(
+fn move_objects(
     mut button_events: EventReader<MouseButtonInput>,
     mut m1held: ResMut<M1Held>,
     window: Single<&Window>,
-    m_d: Res<AccumulatedMouseMotion>,
+    camera: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
+    delta: Res<AccumulatedMouseMotion>,
     sun: Single<(&mut Transform, &Sun), With<Sun>>,
+    target: Single<(&mut Transform, &Oscillate), (With<Oscillate>, Without<Sun>)>,
 ) {
     for button_event in button_events.read() {
-        if button_event.button != MouseButton::Left {
-            continue;
+        if button_event.button == MouseButton::Left {
+            *m1held = M1Held(button_event.state.is_pressed());
+            break;
         }
-        *m1held = M1Held(button_event.state.is_pressed());
     }
-    if m1held.0 && m_d.delta != Vec2::ZERO {
-        let obj = sun.into_inner();
-        let mut shape = obj.0;
-        let data = obj.1;
 
-        let viewport_size = window.size() * 0.5;
-        shape.translation += Vec3::new(m_d.delta.x, -m_d.delta.y, 0.0);
-        shape.translation = shape.translation.clamp(
-            Vec3::new(
-                -viewport_size.x + data.radius,
-                -viewport_size.y + data.radius,
-                0.0,
-            ),
-            Vec3::new(
-                viewport_size.x - data.radius,
-                viewport_size.y - data.radius,
-                0.0,
-            ),
-        );
+    if m1held.0 && delta.delta != Vec2::ZERO {
+        if let Some(mouse_pos) = window
+            .cursor_position()
+            .and_then(|cursor| camera.0.viewport_to_world_2d(camera.1, cursor).ok())
+        {
+            let viewport_size = window.size() * 0.5;
+            let v_x = viewport_size.x;
+            let v_y = viewport_size.y;
+
+            let sun = sun.into_inner();
+            let mut sun_object = sun.0;
+            let r = sun.1.radius;
+
+            let pos = (mouse_pos.x - sun_object.translation.x).powi(2)
+                + (mouse_pos.y - sun_object.translation.y).powi(2);
+
+            if pos < r * r {
+                sun_object.translation += Vec3::new(delta.delta.x, -delta.delta.y, 0.0);
+                sun_object.translation = sun_object.translation.clamp(
+                    Vec3::new(-v_x + r, -v_y + r, 0.0),
+                    Vec3::new(v_x - r, v_y - r, 0.0),
+                );
+            } else {
+                let target = target.into_inner();
+                let mut target_object = target.0;
+                let r = target.1.radius;
+
+                let pos = (mouse_pos.x - target_object.translation.x).powi(2)
+                    + (mouse_pos.y - target_object.translation.y).powi(2);
+
+                if pos < r * r {
+                    target_object.translation += Vec3::new(delta.delta.x, -delta.delta.y, 1.0);
+                    target_object.translation = target_object.translation.clamp(
+                        Vec3::new(-v_x + r, -v_y + r, 1.0),
+                        Vec3::new(v_x - r, v_y - r, 1.0),
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -177,7 +196,7 @@ fn spawn(
         },
         Tonemapping::TonyMcMapface,
         Bloom {
-            intensity: 0.10,
+            intensity: 0.07,
             ..default()
         },
     ));
@@ -199,6 +218,7 @@ fn spawn(
             radius: TARGET_RADIUS,
         },
         MeshMaterial2d(materials.add(Color::linear_rgb(255.0, 255.0, 255.0))),
+        Transform::from_xyz(200.0, 0.0, 1.0),
     ));
 
     commands.spawn((
@@ -213,7 +233,7 @@ fn spawn(
             top: Val::Px(30.0),
             ..default()
         },
-        RayText
+        RayText,
     ));
 }
 
