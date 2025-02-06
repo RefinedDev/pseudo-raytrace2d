@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use bevy::{
     color::palettes::css::WHITE,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
@@ -7,14 +5,6 @@ use bevy::{
     input::mouse::{AccumulatedMouseMotion, MouseButtonInput},
     prelude::*,
 };
-
-fn inv_sqrt(x: f32) -> f32 {
-    let i = x.to_bits();
-    let i = 0x5f3759df - (i >> 1);
-    let y = f32::from_bits(i);
-
-    y * (1.5 - 0.5 * x * y * y)
-}
 
 #[derive(Resource)]
 struct M1Held(bool);
@@ -90,7 +80,7 @@ fn draw_rays(
     let sun = sun.into_inner();
     let target = target.into_inner();
     let viewport_size = 0.5 * window.size();
-    let increment = (PI / 180.0) * (360.0 / n_rays.0);
+    let increment = (360.0 / n_rays.0).to_radians();
 
     let mut angle = 0.0;
     for _ in 0..(n_rays.0 as u32) {
@@ -106,9 +96,6 @@ fn draw_rays(
         let start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
         let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
 
-        // need to find a better soln for this
-        // two coodinates which are on equal magnitude but opposite angles they both satisfy d<target_radius for some reason
-        // so for now i just check if distance of the point away from the target dont check in for now...
         let d_sun_target = (x_target - x_sun).powi(2) + (y_target - y_sun).powi(2);
         let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
 
@@ -116,9 +103,9 @@ fn draw_rays(
             // double point formula
             let m = (end.y - start.y) / (end.x - start.x);
             let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
-            let d = (m * x_target - y_target + c).abs() * inv_sqrt(m * m + 1.0); // perpendicular distance from center of target
+            let d = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
 
-            if d < target.1.radius {
+            if d < target.1.radius.powi(2) {
                 // foot of perpendicular formula
                 let foot_x = -m * (m * x_target - y_target + c) / (m * m + 1.0) + x_target;
                 let foot_y = (m * x_target - y_target + c) / (m * m + 1.0) + y_target;
