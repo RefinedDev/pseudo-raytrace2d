@@ -1,7 +1,3 @@
-// BUG: Targets which are in front of a target and also come after the target in the Query iterator tend to
-// overtake the rays from the first target into themselves leading to weird stuff
-// ill try fixing it next commit
-
 use bevy::{
     color::palettes::tailwind::YELLOW_100,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
@@ -130,6 +126,12 @@ fn draw_rays(
         let start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
         let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
 
+        let mut n_m = 0.0;
+        let mut n_c = 0.0; 
+        let mut n_x = 0.0;
+        let mut n_y = 0.0;
+        let mut n_d = 10e10; // nearest distance from sun, 10e5 as placeholder
+
         for target in targets.iter() {
             let x_target = target.0.translation.x;
             let y_target = target.0.translation.y;
@@ -144,17 +146,27 @@ fn draw_rays(
                 let d = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
     
                 if d < target.1.radius.powi(2) {
-                    // foot of perpendicular formula for line, its not accurate for circle
-                    // due to its curvature but i can conceal the extended part by ZIndex :P
-                    // i should rather intersect for the exact coordinate
-                    let foot_x = -m * (m * x_target - y_target + c) / (m * m + 1.0) + x_target;
-                    let foot_y = (m * x_target - y_target + c) / (m * m + 1.0) + y_target;
-                    end.x = foot_x;
-                    end.y = foot_y;
+                    if d_sun_target < n_d {
+                        n_d = d_sun_target;
+                        n_m = m;
+                        n_c = c;
+                        n_x = x_target;
+                        n_y = y_target;
+                    }
                 }
             }
         }
-       
+        
+        if n_d != 10e10 {
+            // foot of perpendicular formula for line, its not accurate for circle
+            // due to its curvature but i can conceal the extended part by ZIndex :P
+            // i should rather intersect for the exact coordinate
+            let foot_x = -n_m * (n_m * n_x - n_y + n_c) / (n_m * n_m + 1.0) + n_x;
+            let foot_y = (n_m * n_x - n_y + n_c) / (n_m * n_m + 1.0) + n_y;
+            end.x = foot_x;
+            end.y = foot_y;
+        }
+
         gizmos.line_2d(start, end, YELLOW_100);
 
         angle += increment;
