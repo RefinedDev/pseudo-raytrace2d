@@ -35,7 +35,7 @@ fn main() {
         FpsOverlayPlugin {
             config: FpsOverlayConfig {
                 text_config: TextFont {
-                    font_size: 30.0,
+                    font_size: 20.0,
                     ..default()
                 },
                 text_color: Color::linear_rgb(0.0, 255.0, 0.0),
@@ -97,6 +97,7 @@ fn input_handle(
             let pos = (position.x - target.0.translation.x).powi(2) + (position.y - target.0.translation.y).powi(2);
             if pos < r * r {
                 commands.entity(target.2).despawn();
+                break;
             }
         }
     }
@@ -283,16 +284,30 @@ fn spawn(
     commands.spawn((
         Text::new("Number of rays: _"),
         TextFont {
-            font_size: 30.0,
+            font_size: 20.0,
             ..default()
         },
         TextColor(Color::linear_rgb(0.0, 255.0, 0.0)),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(30.0),
+            top: Val::Px(20.0),
             ..default()
         },
         RayText,
+    ));
+
+    commands.spawn((
+        Text::new("Use RIGHT/LEFT arrow for rays\nUse UP/DOWN arrow for targets"),
+        TextFont {
+            font_size: 20.0,
+            ..default()
+        },
+        TextColor(Color::linear_rgb(0.0, 255.0, 0.0)),
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(0.0),
+            ..default()
+        },
     ));
 }
 
