@@ -1,9 +1,5 @@
 use bevy::{
-    color::palettes::tailwind::YELLOW_100,
-    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
-    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
-    input::mouse::{AccumulatedMouseMotion, MouseButtonInput},
-    prelude::*,
+    color::palettes::tailwind::YELLOW_100, core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin}, input::mouse::{AccumulatedMouseMotion, MouseButtonInput}, math::ops::atan, prelude::*
 };
 
 const SUN_RADIUS: f32 = 75.0;
@@ -14,6 +10,9 @@ struct M1Held(bool);
 
 #[derive(Resource)]
 struct NumberOfRays(f32);
+
+#[derive(Resource)]
+struct Reflection(bool);
 
 #[derive(Component)]
 struct Target {
@@ -47,7 +46,8 @@ fn main() {
     .add_systems(Update, (draw_rays, input_handle))
     .add_systems(FixedUpdate, (oscillate_target, move_objects))
     .insert_resource(M1Held(false))
-    .insert_resource(NumberOfRays(100.0))
+    .insert_resource(Reflection(false))
+    .insert_resource(NumberOfRays(4.0))
     .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
     .run();
 }
@@ -65,7 +65,14 @@ fn input_handle(
 
     mut rays: ResMut<NumberOfRays>,
     mut ray_text: Single<&mut Text, With<RayText>>,
+
+    mut reflections: ResMut<Reflection>,
 ) {
+    // REFLECTIONS
+    if  keyboard_input.just_pressed(KeyCode::Space) {
+        reflections.0 =  !reflections.0;
+    }
+
     // RAYS
     if keyboard_input.pressed(KeyCode::ArrowRight) {
         rays.0 += 1.0;
@@ -110,6 +117,8 @@ fn draw_rays(
 
     window: Single<&Window>,
     mut gizmos: Gizmos,
+
+    is_reflecting: Res<Reflection>,
 ) {
     // cannot manually draw pixels, so i have to check for intersections with math
     let viewport_size = 0.5 * window.size();
@@ -127,12 +136,13 @@ fn draw_rays(
         let start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
         let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
 
-        let mut n_m = 0.0;
-        let mut n_c = 0.0; 
-        let mut n_x = 0.0;
-        let mut n_y = 0.0;
-        let mut n_d = 10e10; // nearest distance from sun, 10e5 as placeholder
+        let m = (end.y - start.y) / (end.x - start.x);
+        let c =  -m * start.x + start.y; // y = mx + (-mx1 + y1) 
+        let r_sq = TARGET_RADIUS*TARGET_RADIUS;
 
+        let mut n_x = 0.0; // x center of nearest target
+        let mut n_y = 0.0; // y center of nearest target
+        let mut n_d = 10e10; // nearest distance from sun, 10e10 as placeholder
         for target in targets.iter() {
             let x_target = target.0.translation.x;
             let y_target = target.0.translation.y;
@@ -141,16 +151,10 @@ fn draw_rays(
             let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
     
             if d_start_target <= d_sun_target {
-                // double point formula
-                let m = (end.y - start.y) / (end.x - start.x);
-                let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
-                let d = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
-    
-                if d < target.1.radius.powi(2) {
+                let d_sq = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
+                if d_sq < r_sq {
                     if d_sun_target < n_d {
                         n_d = d_sun_target;
-                        n_m = m;
-                        n_c = c;
                         n_x = x_target;
                         n_y = y_target;
                     }
@@ -158,23 +162,46 @@ fn draw_rays(
             }
         }
         
+        let mut foot_x = 0.0;
+        let mut foot_y = 0.0;
         if n_d != 10e10 {
-            // foot of perpendicular formula for line, its not accurate for circle
-            // due to its curvature but i can conceal the extended part by ZIndex :P
-            // i should rather intersect for the exact coordinate
-            let foot_x = -n_m * (n_m * n_x - n_y + n_c) / (n_m * n_m + 1.0) + n_x;
-            let foot_y = (n_m * n_x - n_y + n_c) / (n_m * n_m + 1.0) + n_y;
+            let sqrt = (r_sq*m*m + r_sq - c*c - 2.0*c*n_x*m + 2.0*c*n_y - n_x*n_x*m*m + 2.0*n_x*n_y*m - n_y*n_y).sqrt();
+            let exp1 = -c*m + n_x + n_y*m;
+            let exp2 = m*m + 1.0;
+
+            foot_x = (-sqrt + exp1)/exp2;
+    
+            if foot_x < start.x {  // left relative to starting point
+                foot_x = (sqrt + exp1)/exp2;
+            }
+
+            foot_y = foot_x*m + c;
+
             end.x = foot_x;
             end.y = foot_y;
         }
 
-        gizmos.line_2d(start, end, YELLOW_100);
+        if is_reflecting.0 {
+            if n_d != 10e10 { // the ray actually hit a target
+                gizmos.line_2d(start, end, YELLOW_100);
+                
+                let normal_m = (foot_y - n_y)/(foot_x - n_x);
+                let angle = atan((m - normal_m) / 1.0 + normal_m*m);
 
+                let reflection_end = Vec2::new(1.5 * viewport_size.x * ops::sin(angle), 1.5 * viewport_size.y * ops::cos(angle));
+                gizmos.line_2d(end, reflection_end, YELLOW_100);
+            }
+             
+        } else {
+            gizmos.line_2d(start, end, YELLOW_100)
+        }
+       
         angle += increment;
     }
 }
 
-fn oscillate_target(mut targets: Query<&mut Transform, With<Target>>, time: Res<Time<Fixed>>) {
+fn oscillate_target(mut targets: Query<&mut Transform, With<Target>>, time: Res<Time<Fixed>>, is_reflecting: Res<Reflection>) {
+    if is_reflecting.0 == true { return }
     for mut target in targets.iter_mut() {
         target.translation += Vec3::new(
             30.0 * 0.5 * ops::cos(time.elapsed_secs()) * time.delta_secs(),
@@ -297,7 +324,7 @@ fn spawn(
     ));
 
     commands.spawn((
-        Text::new("Use RIGHT/LEFT arrow for rays\nUse UP/DOWN arrow for targets"),
+        Text::new("RIGHT/LEFT arrow for rays\nUP/DOWN arrow for targets\nSPACE to toggle reflections"),
         TextFont {
             font_size: 20.0,
             ..default()
