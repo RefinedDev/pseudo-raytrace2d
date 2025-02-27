@@ -1,5 +1,10 @@
 use bevy::{
-    color::palettes::tailwind::YELLOW_100, core_pipeline::{bloom::Bloom, tonemapping::Tonemapping}, dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin}, input::mouse::{AccumulatedMouseMotion, MouseButtonInput}, math::ops::atan, prelude::*
+    color::palettes::tailwind::YELLOW_100,
+    core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
+    dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
+    input::mouse::{AccumulatedMouseMotion, MouseButtonInput},
+    math::ops::{sin, cos},
+    prelude::*,
 };
 
 const SUN_RADIUS: f32 = 75.0;
@@ -69,8 +74,8 @@ fn input_handle(
     mut reflections: ResMut<Reflection>,
 ) {
     // REFLECTIONS
-    if  keyboard_input.just_pressed(KeyCode::Space) {
-        reflections.0 =  !reflections.0;
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        reflections.0 = !reflections.0;
     }
 
     // RAYS
@@ -85,7 +90,7 @@ fn input_handle(
     let Some(pix_pos) = window.cursor_position() else {
         return;
     };
-    
+
     // TARGETS
     if keyboard_input.just_pressed(KeyCode::ArrowUp) {
         let position = camera.0.viewport_to_world(camera.1, pix_pos).unwrap();
@@ -101,7 +106,8 @@ fn input_handle(
         let position = camera.0.viewport_to_world_2d(camera.1, pix_pos).unwrap();
         for target in targets.iter() {
             let r = target.1.radius;
-            let pos = (position.x - target.0.translation.x).powi(2) + (position.y - target.0.translation.y).powi(2);
+            let pos = (position.x - target.0.translation.x).powi(2)
+                + (position.y - target.0.translation.y).powi(2);
             if pos < r * r {
                 commands.entity(target.2).despawn();
                 break;
@@ -125,10 +131,10 @@ fn draw_rays(
 
     let increment = (360.0 / n_rays.0).to_radians();
     let mut angle = 0.0;
-    
+
     for _ in 0..(n_rays.0 as u32) {
-        let cosx = ops::cos(angle);
-        let sinx = ops::sin(angle);
+        let cosx = cos(angle);
+        let sinx = sin(angle);
 
         let x_sun = sun.0.translation.x;
         let y_sun = sun.0.translation.y;
@@ -137,8 +143,8 @@ fn draw_rays(
         let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
 
         let m = (end.y - start.y) / (end.x - start.x);
-        let c =  -m * start.x + start.y; // y = mx + (-mx1 + y1) 
-        let r_sq = TARGET_RADIUS*TARGET_RADIUS;
+        let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
+        let r_sq = TARGET_RADIUS * TARGET_RADIUS;
 
         let mut n_x = 0.0; // x center of nearest target
         let mut n_y = 0.0; // y center of nearest target
@@ -149,7 +155,7 @@ fn draw_rays(
 
             let d_sun_target = (x_target - x_sun).powi(2) + (y_target - y_sun).powi(2);
             let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
-    
+
             if d_start_target <= d_sun_target {
                 let d_sq = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
                 if d_sq < r_sq {
@@ -161,54 +167,64 @@ fn draw_rays(
                 }
             }
         }
-        
+
         let mut foot_x = 0.0;
         let mut foot_y = 0.0;
         if n_d != 10e10 {
-            let sqrt = (r_sq*m*m + r_sq - c*c - 2.0*c*n_x*m + 2.0*c*n_y - n_x*n_x*m*m + 2.0*n_x*n_y*m - n_y*n_y).sqrt();
-            let exp1 = -c*m + n_x + n_y*m;
-            let exp2 = m*m + 1.0;
+            let sqrt = (r_sq * m * m + r_sq - c * c - 2.0 * c * n_x * m + 2.0 * c * n_y
+                - n_x * n_x * m * m
+                + 2.0 * n_x * n_y * m
+                - n_y * n_y)
+                .sqrt();
+            let exp1 = -c * m + n_x + n_y * m;
+            let exp2 = m * m + 1.0;
 
-            foot_x = (-sqrt + exp1)/exp2;
-    
-            if foot_x < start.x {  // left relative to starting point
-                foot_x = (sqrt + exp1)/exp2;
+            foot_x = (-sqrt + exp1) / exp2;
+
+            if foot_x < start.x {
+                foot_x = (sqrt + exp1) / exp2;
             }
 
-            foot_y = foot_x*m + c;
+            foot_y = foot_x * m + c;
 
             end.x = foot_x;
             end.y = foot_y;
         }
 
         if is_reflecting.0 {
-            if n_d != 10e10 { // the ray actually hit a target
+            if n_d != 10e10 {
+                // the ray actually hit a target
                 gizmos.line_2d(start, end, YELLOW_100);
-                
+
                 // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
                 let dirn_vector = (end - start).normalize();
                 let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
-                let perp_component = dirn_vector.dot(normal_vector)*normal_vector;
+                let perp_component = dirn_vector.dot(normal_vector) * normal_vector;
                 let parallel_component = dirn_vector - perp_component;
                 let resultant = parallel_component - perp_component;
 
-                gizmos.line_2d(end, resultant*10e5, YELLOW_100);
+                gizmos.line_2d(end, resultant * 10e5, YELLOW_100);
             }
-             
         } else {
             gizmos.line_2d(start, end, YELLOW_100)
         }
-       
+
         angle += increment;
     }
 }
 
-fn oscillate_target(mut targets: Query<&mut Transform, With<Target>>, time: Res<Time<Fixed>>, is_reflecting: Res<Reflection>) {
-    if is_reflecting.0 == true { return }
+fn oscillate_target(
+    mut targets: Query<&mut Transform, With<Target>>,
+    time: Res<Time<Fixed>>,
+    is_reflecting: Res<Reflection>,
+) {
+    if is_reflecting.0 == true {
+        return;
+    }
     for mut target in targets.iter_mut() {
         target.translation += Vec3::new(
-            30.0 * 0.5 * ops::cos(time.elapsed_secs()) * time.delta_secs(),
-            30.0 * 1.1 * ops::sin(time.elapsed_secs()) * time.delta_secs(),
+            30.0 * 0.5 * cos(time.elapsed_secs()) * time.delta_secs(),
+            30.0 * 1.1 * sin(time.elapsed_secs()) * time.delta_secs(),
             0.0,
         );
     }
@@ -327,7 +343,9 @@ fn spawn(
     ));
 
     commands.spawn((
-        Text::new("RIGHT/LEFT arrow for rays\nUP/DOWN arrow for targets\nSPACE to toggle reflections"),
+        Text::new(
+            "RIGHT/LEFT arrow for rays\nUP/DOWN arrow for targets\nSPACE to toggle reflections",
+        ),
         TextFont {
             font_size: 20.0,
             ..default()
