@@ -47,7 +47,7 @@ fn main() {
     .add_systems(FixedUpdate, (oscillate_target, move_objects))
     .insert_resource(M1Held(false))
     .insert_resource(Reflection(false))
-    .insert_resource(NumberOfRays(4.0))
+    .insert_resource(NumberOfRays(100.0))
     .insert_resource(ClearColor(Color::srgb(0.0, 0.0, 0.0)))
     .run();
 }
@@ -185,11 +185,14 @@ fn draw_rays(
             if n_d != 10e10 { // the ray actually hit a target
                 gizmos.line_2d(start, end, YELLOW_100);
                 
-                let normal_m = (foot_y - n_y)/(foot_x - n_x);
-                let angle = atan((m - normal_m) / 1.0 + normal_m*m);
+                // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
+                let dirn_vector = (end - start).normalize();
+                let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
+                let perp_component = dirn_vector.dot(normal_vector)*normal_vector;
+                let parallel_component = dirn_vector - perp_component;
+                let resultant = parallel_component - perp_component;
 
-                let reflection_end = Vec2::new(1.5 * viewport_size.x * ops::sin(angle), 1.5 * viewport_size.y * ops::cos(angle));
-                gizmos.line_2d(end, reflection_end, YELLOW_100);
+                gizmos.line_2d(end, resultant*10e5, YELLOW_100);
             }
              
         } else {
