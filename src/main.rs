@@ -1,14 +1,19 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use bevy::{
     color::palettes::tailwind::YELLOW_100,
     core_pipeline::{bloom::Bloom, tonemapping::Tonemapping},
     dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin},
     input::mouse::{AccumulatedMouseMotion, MouseButtonInput},
-    math::ops::{sin, cos},
+    math::ops::{cos, sin},
     prelude::*,
 };
 
+static ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 const SUN_RADIUS: f32 = 75.0;
 const TARGET_RADIUS: f32 = 100.0;
+const R_SQ: f32 = TARGET_RADIUS * TARGET_RADIUS;
+const R_SUN_SQ: f32 = SUN_RADIUS * SUN_RADIUS;
 
 #[derive(Resource)]
 struct M1Held(bool);
@@ -22,6 +27,7 @@ struct Reflection(bool);
 #[derive(Component)]
 struct Target {
     radius: f32,
+    id: usize,
 }
 
 #[derive(Component)]
@@ -98,6 +104,7 @@ fn input_handle(
             Mesh2d(meshes.add(Circle::new(TARGET_RADIUS))),
             Target {
                 radius: TARGET_RADIUS,
+                id: ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             },
             MeshMaterial2d(materials.add(Color::linear_rgb(255.0, 255.0, 255.0))),
             Transform::from_translation(position.origin),
@@ -139,76 +146,132 @@ fn draw_rays(
         let x_sun = sun.0.translation.x;
         let y_sun = sun.0.translation.y;
 
-        let start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
+        let mut start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
         let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
 
-        let m = (end.y - start.y) / (end.x - start.x);
-        let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
-        let r_sq = TARGET_RADIUS * TARGET_RADIUS;
+        let mut reflecting_off_of: Option<&Target> = None;
+        let mut reflecting_off_sun = false;
+        let mut being_reflected = false;
+        loop {
+            let m = (end.y - start.y) / (end.x - start.x);
+            let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
 
-        let mut n_x = 0.0; // x center of nearest target
-        let mut n_y = 0.0; // y center of nearest target
-        let mut n_d = 10e10; // nearest distance from sun, 10e10 as placeholder
-        for target in targets.iter() {
-            let x_target = target.0.translation.x;
-            let y_target = target.0.translation.y;
+            let mut n_x = 0.0; // x center of nearest target
+            let mut n_y = 0.0; // y center of nearest target
+            let mut n_target: Option<&Target> = None; // nearest target object
+            let mut n_d = 10e10; // nearest distance from (sun/target), 10e10 as placeholder
 
-            let d_sun_target = (x_target - x_sun).powi(2) + (y_target - y_sun).powi(2);
-            let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
+            for target in targets.iter() {
+                if let Some(v) = reflecting_off_of {
+                    if v.id == target.1.id {
+                        // dont want it reflecting off of itself
+                        continue;
+                    }
+                }
 
-            if d_start_target <= d_sun_target {
+                let x_target = target.0.translation.x;
+                let y_target = target.0.translation.y;
+
+                let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
                 let d_sq = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
-                if d_sq < r_sq {
-                    if d_sun_target < n_d {
-                        n_d = d_sun_target;
-                        n_x = x_target;
-                        n_y = y_target;
+
+                if d_sq < R_SQ {
+                    if being_reflected {
+                        if d_start_target < n_d {
+                            n_d = d_start_target;
+                            n_x = x_target;
+                            n_y = y_target;
+                            n_target = Some(target.1);
+                        }
+                    } else {
+                        let d_sun_target = (x_target - x_sun).powi(2) + (y_target - y_sun).powi(2);
+                        if d_start_target <= d_sun_target {
+                            if d_sun_target < n_d {
+                                n_d = d_sun_target;
+                                n_x = x_target;
+                                n_y = y_target;
+                                n_target = Some(target.1);
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        let mut foot_x = 0.0;
-        let mut foot_y = 0.0;
-        if n_d != 10e10 {
-            let sqrt = (r_sq * m * m + r_sq - c * c - 2.0 * c * n_x * m + 2.0 * c * n_y
-                - n_x * n_x * m * m
-                + 2.0 * n_x * n_y * m
-                - n_y * n_y)
-                .sqrt();
-            let exp1 = -c * m + n_x + n_y * m;
-            let exp2 = m * m + 1.0;
-
-            foot_x = (-sqrt + exp1) / exp2;
-
-            if foot_x < start.x {
-                foot_x = (sqrt + exp1) / exp2;
+            // check reflections with the sun
+            if being_reflected {
+                let d_start_sun = (x_sun - start.x).powi(2) + (y_sun - start.y).powi(2);
+                if d_start_sun < n_d {
+                    // only wanna do it if ray closest to sun
+                    let d_sq = (m * x_sun - y_sun + c).powi(2) / (m * m + 1.0);
+                    if !reflecting_off_sun && d_sq < R_SUN_SQ {
+                        n_x = x_sun;
+                        n_y = y_sun;
+                        n_target = None;
+                        reflecting_off_sun = true;
+                    } else {
+                        reflecting_off_sun = false;
+                    }
+                } else {
+                    reflecting_off_sun = false;
+                }
             }
 
-            foot_y = foot_x * m + c;
+            let mut foot_x = 0.0;
+            let mut foot_y = 0.0;
+            if n_target.is_some() || reflecting_off_sun {
+                let mut r = R_SQ;
+                if reflecting_off_sun {
+                    r = R_SUN_SQ;
+                }
 
-            end.x = foot_x;
-            end.y = foot_y;
-        }
+                let sqrt = (r * m * m + r - c * c - 2.0 * c * n_x * m + 2.0 * c * n_y
+                    - n_x * n_x * m * m
+                    + 2.0 * n_x * n_y * m
+                    - n_y * n_y)
+                    .sqrt();
 
-        if is_reflecting.0 {
-            if n_d != 10e10 {
-                // the ray actually hit a target
+                let exp1 = -c * m + n_x + n_y * m;
+                let exp2 = m * m + 1.0;
+
+                foot_x = (-sqrt + exp1) / exp2;
+
+                if foot_x < start.x {
+                    foot_x = (sqrt + exp1) / exp2;
+                }
+
+                foot_y = foot_x * m + c;
+
+                end.x = foot_x;
+                end.y = foot_y;
+            }
+
+            if is_reflecting.0 {
+                if n_target.is_some() || reflecting_off_sun {
+                    gizmos.line_2d(start, end, YELLOW_100);
+
+                    // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
+                    let dirn_vector = (end - start).normalize();
+                    let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
+                    let perp_component = dirn_vector.dot(normal_vector) * normal_vector;
+                    let parallel_component = dirn_vector - perp_component;
+                    let resultant = parallel_component - perp_component;
+
+                    start = end;
+                    end = resultant * 10e2;
+
+                    reflecting_off_of = n_target;
+                    being_reflected = true;
+                } else {
+                    if being_reflected {
+                        gizmos.line_2d(start, end, YELLOW_100);
+                    }
+                    break;
+                }
+            } else {
                 gizmos.line_2d(start, end, YELLOW_100);
-
-                // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
-                let dirn_vector = (end - start).normalize();
-                let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
-                let perp_component = dirn_vector.dot(normal_vector) * normal_vector;
-                let parallel_component = dirn_vector - perp_component;
-                let resultant = parallel_component - perp_component;
-
-                gizmos.line_2d(end, resultant * 10e5, YELLOW_100);
+                break;
             }
-        } else {
-            gizmos.line_2d(start, end, YELLOW_100)
         }
-
         angle += increment;
     }
 }
@@ -322,6 +385,7 @@ fn spawn(
         Mesh2d(meshes.add(Circle::new(TARGET_RADIUS))),
         Target {
             radius: TARGET_RADIUS,
+            id: ID_COUNTER.fetch_add(1, Ordering::Relaxed),
         },
         MeshMaterial2d(materials.add(Color::linear_rgb(255.0, 255.0, 255.0))),
         Transform::from_xyz(200.0, 0.0, 1.0),
