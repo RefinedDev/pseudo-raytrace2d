@@ -140,21 +140,18 @@ fn draw_rays(
     let mut angle = 0.0;
 
     for _ in 0..(n_rays.0 as u32) {
-        let cosx = cos(angle);
-        let sinx = sin(angle);
-
         let x_sun = sun.0.translation.x;
         let y_sun = sun.0.translation.y;
 
-        let mut start = Vec2::new(x_sun + sun.1.radius * sinx, y_sun + sun.1.radius * cosx);
-        let mut end = Vec2::new(1.5 * viewport_size.x * sinx, 1.5 * viewport_size.y * cosx);
+        let mut start = Vec2::new(x_sun + sun.1.radius * sin(angle), y_sun + sun.1.radius * cos(angle));
+        let mut end = Vec2::new(1.5 * viewport_size.x * sin(angle), 1.5 * viewport_size.y * cos(angle));
 
         let mut reflecting_off_of: Option<&Target> = None;
         let mut reflecting_off_sun = false;
         let mut being_reflected = false;
         loop {
-            let m = (end.y - start.y) / (end.x - start.x);
-            let c = -m * start.x + start.y; // y = mx + (-mx1 + y1)
+            let m = (end.y - start.y) / (end.x - start.x); // (slope)
+            let c = -m * start.x + start.y; // y = mx + (-mx1 + y1) (intercept)
 
             let mut n_x = 0.0; // x center of nearest target
             let mut n_y = 0.0; // y center of nearest target
@@ -200,17 +197,13 @@ fn draw_rays(
             // check reflections with the sun
             if being_reflected {
                 let d_start_sun = (x_sun - start.x).powi(2) + (y_sun - start.y).powi(2);
-                if d_start_sun < n_d {
+                let d_sq = (m * x_sun - y_sun + c).powi(2) / (m * m + 1.0);
+                if d_start_sun < n_d && !reflecting_off_sun && d_sq < R_SUN_SQ {
                     // only wanna do it if ray closest to sun
-                    let d_sq = (m * x_sun - y_sun + c).powi(2) / (m * m + 1.0);
-                    if !reflecting_off_sun && d_sq < R_SUN_SQ {
-                        n_x = x_sun;
-                        n_y = y_sun;
-                        n_target = None;
-                        reflecting_off_sun = true;
-                    } else {
-                        reflecting_off_sun = false;
-                    }
+                    n_x = x_sun;
+                    n_y = y_sun;
+                    n_target = None;
+                    reflecting_off_sun = true;
                 } else {
                     reflecting_off_sun = false;
                 }
@@ -224,6 +217,8 @@ fn draw_rays(
                     r = R_SUN_SQ;
                 }
 
+                // intersection of a line and a circle
+                // you can put the formula (x-h)^2 + (mx + c - k)^2 = r^2 into wolfram or something to get soln in terms of x
                 let sqrt = (r * m * m + r - c * c - 2.0 * c * n_x * m + 2.0 * c * n_y
                     - n_x * n_x * m * m
                     + 2.0 * n_x * n_y * m
