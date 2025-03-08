@@ -149,6 +149,7 @@ fn draw_rays(
         let mut reflecting_off_of: Option<&Target> = None;
         let mut reflecting_off_sun = false;
         let mut being_reflected = false;
+        let mut no_of_reflections = 0; // too many reflections lead to crashes so i gotta limit :(
         loop {
             let m = (end.y - start.y) / (end.x - start.x); // (slope)
             let c = -m * start.x + start.y; // y = mx + (-mx1 + y1) (intercept)
@@ -244,6 +245,11 @@ fn draw_rays(
                 if n_target.is_some() || reflecting_off_sun {
                     gizmos.line_2d(start, end, YELLOW_100);
 
+                    no_of_reflections += 1;
+                    if no_of_reflections == 10 {
+                        break;
+                    }
+                    
                     // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
                     let dirn_vector = (end - start).normalize();
                     let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
