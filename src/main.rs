@@ -151,13 +151,13 @@ fn draw_rays(
         let mut being_reflected = false;
         let mut no_of_reflections = 0; // too many reflections lead to crashes so i gotta limit :(
         loop {
-            let m = (end.y - start.y) / (end.x - start.x); // (slope)
-            let c = -m * start.x + start.y; // y = mx + (-mx1 + y1) (intercept)
+            let slope = (end.y - start.y) / (end.x - start.x); // (slope)
+            let intercept = -slope * start.x + start.y; // y = mx + (-mx1 + y1) (intercept)
 
-            let mut n_x = 0.0; // x center of nearest target
-            let mut n_y = 0.0; // y center of nearest target
+            let mut nearest_target_x = 0.0; // x center of nearest target
+            let mut nearest_target_y = 0.0; // y center of nearest target
             let mut n_target: Option<&Target> = None; // nearest target object
-            let mut n_d = 10e10; // nearest distance from (sun/target), 10e10 as placeholder
+            let mut nearest_target_distance = 10e10; // nearest distance from (sun/target), 10e10 as placeholder
 
             for target in targets.iter() {
                 if let Some(v) = reflecting_off_of {
@@ -171,23 +171,23 @@ fn draw_rays(
                 let y_target = target.0.translation.y;
 
                 let d_start_target = (x_target - start.x).powi(2) + (y_target - start.y).powi(2);
-                let d_sq = (m * x_target - y_target + c).powi(2) / (m * m + 1.0); // perpendicular distance from center of target^2
+                let d_sq = (slope * x_target - y_target + intercept).powi(2) / (slope * slope + 1.0); // perpendicular distance from center of target^2
 
                 if d_sq < R_SQ {
                     if being_reflected {
-                        if d_start_target < n_d {
-                            n_d = d_start_target;
-                            n_x = x_target;
-                            n_y = y_target;
+                        if d_start_target < nearest_target_distance {
+                            nearest_target_distance = d_start_target;
+                            nearest_target_x = x_target;
+                            nearest_target_y = y_target;
                             n_target = Some(target.1);
                         }
                     } else {
                         let d_sun_target = (x_target - x_sun).powi(2) + (y_target - y_sun).powi(2);
                         if d_start_target <= d_sun_target {
-                            if d_sun_target < n_d {
-                                n_d = d_sun_target;
-                                n_x = x_target;
-                                n_y = y_target;
+                            if d_sun_target < nearest_target_distance {
+                                nearest_target_distance = d_sun_target;
+                                nearest_target_x = x_target;
+                                nearest_target_y = y_target;
                                 n_target = Some(target.1);
                             }
                         }
@@ -198,11 +198,11 @@ fn draw_rays(
             // check reflections with the sun
             if being_reflected {
                 let d_start_sun = (x_sun - start.x).powi(2) + (y_sun - start.y).powi(2);
-                let d_sq = (m * x_sun - y_sun + c).powi(2) / (m * m + 1.0);
-                if d_start_sun < n_d && !reflecting_off_sun && d_sq < R_SUN_SQ {
+                let d_sq = (slope * x_sun - y_sun + intercept).powi(2) / (slope * slope + 1.0);
+                if d_start_sun < nearest_target_distance && !reflecting_off_sun && d_sq < R_SUN_SQ {
                     // only wanna do it if ray closest to sun
-                    n_x = x_sun;
-                    n_y = y_sun;
+                    nearest_target_x = x_sun;
+                    nearest_target_y = y_sun;
                     n_target = None;
                     reflecting_off_sun = true;
                 } else {
@@ -210,8 +210,8 @@ fn draw_rays(
                 }
             }
 
-            let mut foot_x = 0.0;
-            let mut foot_y = 0.0;
+            let mut foot_x = 0.0; // intersection x
+            let mut foot_y = 0.0; // intersection y
             if n_target.is_some() || reflecting_off_sun {
                 let mut r = R_SQ;
                 if reflecting_off_sun {
@@ -220,14 +220,14 @@ fn draw_rays(
 
                 // intersection of a line and a circle
                 // you can put the formula (x-h)^2 + (mx + c - k)^2 = r^2 into wolfram or something to get soln in terms of x
-                let sqrt = (r * m * m + r - c * c - 2.0 * c * n_x * m + 2.0 * c * n_y
-                    - n_x * n_x * m * m
-                    + 2.0 * n_x * n_y * m
-                    - n_y * n_y)
+                let sqrt = (r * slope * slope + r - intercept * intercept - 2.0 * intercept * nearest_target_x * slope + 2.0 * intercept * nearest_target_y
+                    - nearest_target_x * nearest_target_x * slope * slope
+                    + 2.0 * nearest_target_x * nearest_target_y * slope
+                    - nearest_target_y * nearest_target_y)
                     .sqrt();
 
-                let exp1 = -c * m + n_x + n_y * m;
-                let exp2 = m * m + 1.0;
+                let exp1 = -intercept * slope + nearest_target_x + nearest_target_y * slope;
+                let exp2 = slope * slope + 1.0;
 
                 foot_x = (-sqrt + exp1) / exp2;
 
@@ -235,7 +235,7 @@ fn draw_rays(
                     foot_x = (sqrt + exp1) / exp2;
                 }
 
-                foot_y = foot_x * m + c;
+                foot_y = foot_x * slope + intercept;
 
                 end.x = foot_x;
                 end.y = foot_y;
@@ -252,7 +252,7 @@ fn draw_rays(
                     
                     // https://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
                     let dirn_vector = (end - start).normalize();
-                    let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(n_x, n_y)).normalize();
+                    let normal_vector = (Vec2::new(foot_x, foot_y) - Vec2::new(nearest_target_x, nearest_target_y)).normalize();
                     let perp_component = dirn_vector.dot(normal_vector) * normal_vector;
                     let parallel_component = dirn_vector - perp_component;
                     let resultant = parallel_component - perp_component;
