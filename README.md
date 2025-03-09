@@ -1,3 +1,5 @@
+https://refineddev.github.io/pseudo-raytrace2d/
+
 pseudo because in actual raytracing, rays are cast from the observer (target) and traced wrt source (sun)<br>
 here im doing it the way how real life works; (sun) to (target)<br>
 also im using bevy cause i just wanted a rendering pipeline tried to minimize the usage of actual bevy features<br>
